@@ -76,6 +76,7 @@ export default {
     },
     async logout() {
       await this.$store.dispatch('user/logout')
+      localStorage.setItem('ai_chat_history', '')
       this.$router.push(`/login?redirect=${this.$route.fullPath}`)
     }
   }
