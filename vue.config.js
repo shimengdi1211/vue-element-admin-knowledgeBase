@@ -36,6 +36,7 @@ module.exports = {
       warnings: false,
       errors: true
     },
+    before: require('./mock/mock-server.js'),
      proxy: {
       '/dev-api': {  // 代理所有以 /api 开头的请求
         target: 'http://localhost:3000',  // 你的后端地址
@@ -56,7 +57,6 @@ module.exports = {
       },
        
     },
-    before: require('./mock/mock-server.js'),
   },
   configureWebpack: {
     // provide the app's title in webpack's name field, so that
