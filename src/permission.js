@@ -1,74 +1,84 @@
 import router from './router'
 import store from './store'
-import { Message } from 'element-ui'
-import NProgress from 'nprogress' // progress bar
-import 'nprogress/nprogress.css' // progress bar style
-import { getToken } from '@/utils/auth' // get token from cookie
-import getPageTitle from '@/utils/get-page-title'
+import NProgress from 'nprogress' // 进度条
+import 'nprogress/nprogress.css' // 进度条样式
+import { getToken } from '@/utils/auth' // 从cookie获取token
+import { resetRouter, addRoutes } from './router'
+NProgress.configure({ showSpinner: false }) // 进度条配置
 
-NProgress.configure({ showSpinner: false }) // NProgress Configuration
+// 白名单：不需要登录就可以访问的页面
+// const whiteList = ['/login', '/register', '/forgot-password']
 
-const whiteList = ['/login', '/auth-redirect'] // no redirect whitelist
-
+/**
+ * 路由前置守卫
+ * 每次路由跳转前都会执行
+ */
 router.beforeEach(async(to, from, next) => {
-  // start progress bar
   NProgress.start()
-
-  // set page title
-  document.title = getPageTitle(to.meta.title)
-
-  // determine whether the user has logged in
+  console.log('当前路由实例的路由表:', router.options.routes)
+  console.log('当前路径:', to.path)
   const hasToken = getToken()
+  console.log('to', to)
 
   if (hasToken) {
     if (to.path === '/login') {
-      // if is logged in, redirect to the home page
-      next({ path: '/' })
-      NProgress.done() // hack: https://github.com/PanJiaChen/vue-element-admin/pull/2939
+      next('/')
+      NProgress.done()
     } else {
-      // determine whether the user has obtained his permission roles through getInfo
-      const hasRoles = store.getters.roles && store.getters.roles.length > 0
-      if (hasRoles) {
-        next()
-      } else {
-        try {
-          // get user info
-          // note: roles must be a object array! such as: ['admin'] or ,['developer','editor']
-          const { roles } = await store.dispatch('user/getInfo')
+      // 每次都需要获取用户信息和菜单
+      // 这样切换用户时自动刷新，虽然有点性能损失但可靠
+      try {
+        console.log('🔄 检查用户状态...')
 
-          // generate accessible routes map based on roles
-          const accessRoutes = await store.dispatch('permission/generateRoutes', roles)
+        // 1. 获取用户信息
+        await store.dispatch('user/getInfo')
 
-          // dynamically add accessible routes
-          router.addRoutes(accessRoutes)
+        // 2. 获取当前用户ID
+        const userInfo = store.getters['user/userInfo']
+        const currentUserId = userInfo?.id
 
-          // hack method to ensure that addRoutes is complete
-          // set the replace: true, so the navigation will not leave a history record
-          next({ ...to, replace: true })
-        } catch (error) {
-          // remove token and go to login page to re-login
-          await store.dispatch('user/resetToken')
-          Message.error(error || 'Has Error')
-          next(`/login?redirect=${to.path}`)
-          NProgress.done()
+        // 3. 检查是否需要更新路由
+        const lastUserId = store.getters['permission/lastUserId']
+
+        if (!currentUserId || currentUserId !== lastUserId) {
+          console.log(`用户变化或首次登录: ${lastUserId} -> ${currentUserId}`)
+
+          // 获取动态菜单
+          const accessRoutes = await store.dispatch('permission/getRoutes')
+
+          // 重置路由
+          resetRouter()
+
+          // 添加新路由
+          addRoutes(accessRoutes)
+
+          // 保存当前用户ID
+          store.commit('permission/SET_LAST_USER_ID', currentUserId)
         }
+
+        next()
+      } catch (error) {
+        console.error('检查用户状态失败:', error)
+        await store.dispatch('user/resetToken')
+        next('/login')
+        NProgress.done()
       }
     }
   } else {
-    /* has no token*/
-
-    if (whiteList.indexOf(to.path) !== -1) {
-      // in the free login whitelist, go directly
+    if (to.path === '/login') {
       next()
     } else {
-      // other pages that do not have permission to access are redirected to the login page.
       next(`/login?redirect=${to.path}`)
       NProgress.done()
     }
   }
 })
 
+/**
+ * 路由后置守卫
+ * 路由跳转完成后执行
+ */
 router.afterEach(() => {
-  // finish progress bar
+  // 完成进度条
   NProgress.done()
 })
