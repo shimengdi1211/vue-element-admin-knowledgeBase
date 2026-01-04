@@ -12,7 +12,7 @@
         :collapse-transition="false"
         mode="vertical"
       >
-        <sidebar-item
+        <Sidebar-item
           v-for="route in sidebar_menus"
           :key="route.path"
           :item="route"

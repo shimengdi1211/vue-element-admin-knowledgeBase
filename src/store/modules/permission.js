@@ -1,7 +1,42 @@
 import { constantRoutes } from '@/router'
 import { getMenus } from '@/api/user'
 import { addRoutes, resetRouter } from '@/router'
+const componentCache = {}
 
+// 初始化组件缓存
+function initComponentCache() {
+  try {
+    const context = require.context('@/views', true, /\.vue$/)
+    const keys = context.keys()
+
+    console.log('📦 初始化组件缓存，找到文件:', keys.length)
+
+    keys.forEach(key => {
+      // 转换路径格式
+      // ./customerService/index.vue -> customerService/index
+      const cleanPath = key.replace(/^\.\//, '').replace(/\.vue$/, '')
+
+      componentCache[cleanPath] = () => {
+        return Promise.resolve(context(key))
+      }
+
+      // 如果是 index.vue，也注册目录名
+      if (key.endsWith('/index.vue')) {
+        const dirPath = key.replace(/\/index\.vue$/, '')
+        componentCache[dirPath] = () => {
+          return Promise.resolve(context(key)) // ⭐ 这个 context(key) 现在是在函数内部，调用时才执行
+        }
+      }
+    })
+
+    console.log('✅ 组件缓存初始化完成:', Object.keys(componentCache))
+  } catch (error) {
+    console.error('❌ 初始化组件缓存失败:', error)
+  }
+}
+
+// 初始化
+initComponentCache()
 const state = {
   routes: [], // 用户可访问的所有路由
   addRoutes: [], // 动态添加的路由
@@ -51,8 +86,6 @@ const actions = {
       getMenus()
         .then(response => {
           const { data } = response
-          console.log('后端返回的菜单数据:', data)
-
           // 格式化路由
           const routes = formatRoutes(data)
           console.log('格式化后的路由:', routes)
@@ -61,18 +94,13 @@ const actions = {
           const sidebarMenus = formatSidebarMenus(data)
 
           resetRouter() // 先重置路由
-          const allRoutes = [...constantRoutes]
+          // const allRoutes = [...constantRoutes]
           // 重置并添加路由
-          addRoutes() //  再添加新路由
+          addRoutes(routes) //  再添加新路由
           // 保存到vuex
-          commit('SET_ROUTES', [])
+          commit('SET_ROUTES', routes)
           commit('SET_SIDEBAR_MENUS', sidebarMenus)
           commit('SET_LAST_USER_ID', currentUserId) //  保存用户ID
-
-          console.log('✅ 路由配置完成')
-          console.log('- 常量路由数量:', constantRoutes.length)
-          console.log('- 动态路由数量:', [])
-          console.log('- 总路由数量:', allRoutes.length)
           resolve()
         })
         .catch(error => {
@@ -110,15 +138,14 @@ function formatRoutes(menus) {
   const routes = []
 
   menus.forEach(menu => {
-    console.log('格式化菜单:', menu.meta.title, '组件:', menu.component)
-
     const route = {
       path: menu.path || '',
       name: menu.name || '',
       meta: {
         title: menu.meta.title || '未命名',
         icon: menu.meta.icon || '',
-        hidden: menu.meta.hidden === 1 || menu.meta.hidden === true
+        hidden: menu.meta.hidden === 1 || menu.meta.hidden === true,
+        menuType: menu.meta.menuType || '1'
       }
     }
 
@@ -126,8 +153,10 @@ function formatRoutes(menus) {
       route.component = getComponent(menu.component)
     } else if (menu.children && menu.children.length > 0) {
       // 如果没有组件但有子菜单，使用 Layout
+      console.log('无组件，但有子菜单，使用Layout')
       route.component = () => import('@/layout')
     } else {
+      console.log('警告：既无组件也无子菜单，使用404组件')
       // 既没有组件也没有子菜单，使用默认组件
       route.component = () => import('@/views/error-page/404')
     }
@@ -147,7 +176,6 @@ function formatRoutes(menus) {
     routes.push(route)
   })
 
-  console.log('格式化后的路由:', routes)
   return routes
 }
 console.log('=== 完整的格式化路由结构 ===')
@@ -160,30 +188,64 @@ function formatSidebarMenus(menus) {
 
 // 获取组件（支持动态导入）
 function getComponent(componentPath) {
-  console.log('获取组件:', componentPath)
-
   if (!componentPath) return null
 
+  // 1. 从缓存中查找
+  if (componentCache[componentPath]) {
+    return componentCache[componentPath]
+  }
+
+  // 2. 处理 Layout
   if (componentPath === 'Layout' || componentPath === 'layout') {
     return () => import('@/layout')
   }
 
-  // 根据路径动态导入
-  try {
-    if (componentPath.includes('/')) {
-      return () => import(`@/views/${componentPath}`)
-    } else {
-      return () => import(`@/views/${componentPath}/index`)
-    }
-  } catch (error) {
-    console.error('动态导入组件失败:', componentPath, error)
-    // 返回一个错误组件
-    return {
-      render(h) {
-        return h('div', `组件加载失败: ${componentPath}`)
-      }
-    }
+  // 可能的路径变体
+  const possiblePaths = [
+    componentPath,
+    componentPath.toLowerCase(),
+    componentPath.replace(/([A-Z])/g, '-$1').toLowerCase(), // camelCase to kebab
+    componentPath.replace(/-([a-z])/g, g => g[1].toUpperCase()) // kebab to camelCase
+  ].filter(path => componentCache[path])
+
+  if (possiblePaths.length > 0) {
+    return componentCache[possiblePaths[0]]
   }
+
+  console.log(`❌ 未找到组件: ${componentPath}`)
+
+  // 返回占位组件
+  return () =>
+    Promise.resolve({
+      default: {
+        name: 'NotFoundComponent',
+        render(h) {
+          return h(
+            'div',
+            {
+              style: 'padding: 30px; text-align: center;'
+            },
+            [
+              h('h2', '页面未找到'),
+              h('p', `组件路径: ${componentPath}`),
+              h(
+                'button',
+                {
+                  on: {
+                    click: () => {
+                      console.log('尝试重新加载组件缓存...')
+                      initComponentCache()
+                    }
+                  },
+                  style: 'margin-top: 20px; padding: 10px 20px;'
+                },
+                '重新加载组件'
+              )
+            ]
+          )
+        }
+      }
+    })
 }
 
 function getDefaultRoutes() {

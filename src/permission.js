@@ -3,7 +3,6 @@ import store from './store'
 import NProgress from 'nprogress' // 进度条
 import 'nprogress/nprogress.css' // 进度条样式
 import { getToken } from '@/utils/auth' // 从cookie获取token
-import { resetRouter, addRoutes } from './router'
 NProgress.configure({ showSpinner: false }) // 进度条配置
 
 // 白名单：不需要登录就可以访问的页面
@@ -15,8 +14,6 @@ NProgress.configure({ showSpinner: false }) // 进度条配置
  */
 router.beforeEach(async(to, from, next) => {
   NProgress.start()
-  console.log('当前路由实例的路由表:', router.options.routes)
-  console.log('当前路径:', to.path)
   const hasToken = getToken()
   console.log('to', to)
 
@@ -45,12 +42,7 @@ router.beforeEach(async(to, from, next) => {
 
           // 获取动态菜单
           const accessRoutes = await store.dispatch('permission/getRoutes')
-
-          // 重置路由
-          resetRouter()
-
-          // 添加新路由
-          addRoutes(accessRoutes)
+          console.log('动态路由已更新:', accessRoutes)
 
           // 保存当前用户ID
           store.commit('permission/SET_LAST_USER_ID', currentUserId)
